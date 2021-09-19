@@ -41,7 +41,8 @@ interface Query<T> {
 
 type QueryBuilder<T> = () => Query<T>;
 
-interface DbEntity<T> {
+export interface DbEntity<T> {
+  create: (o: T) => T | null;
   query: QueryBuilder<T>;
 }
 type Bound = any;
@@ -52,6 +53,15 @@ export const createDbEntity = <T>(
 ): DbEntity<T> => {
   type Predicate = (item: T) => boolean;
   return {
+    create(s: T): T {
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName) as any;
+      if (store === undefined) {
+        return null;
+      }
+      store.put(s);
+      return s;
+    },
     query(): Query<T> {
       let self: Query<T> = {
         _state: {
@@ -190,6 +200,7 @@ export const createDbEntity = <T>(
           for await (const item of self._stream()) {
             return item;
           }
+          return null;
         },
 
         async all(): Promise<T[] | GroupedItems<T>> {

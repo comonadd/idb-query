@@ -76,14 +76,17 @@ describe("entities", () => {
   });
 
   describe("query", () => {
+    let Student: ORM.DbEntity<IStudent>;
+    beforeAll(() => {
+      Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
+    });
+
     it("should return all entities on all()", async () => {
-      const Student = ORM.createDbEntity(db, STORE_NAME);
       const res = await Student.query().all();
       expect(res).toEqual(allStudents);
     });
 
     it("should filter certain entities on when called with all()", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const res = await Student.query()
         .filter((s) => s.age < 20)
         .all();
@@ -91,7 +94,6 @@ describe("entities", () => {
     });
 
     it("should sort if byIndex() is applied with all()", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const res = await Student.query().byIndex("age").all();
       expect(res).toStrictEqual(
         allStudents.sort((a, b) => (a.age > b.age ? 1 : a.age < b.age ? -1 : 0))
@@ -99,7 +101,6 @@ describe("entities", () => {
     });
 
     it("should fail if specified index in byIndex() does not exist", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const idxName = "index-that-does-not-exist";
       expect(async () => {
         await Student.query().byIndex(idxName).all();
@@ -109,7 +110,6 @@ describe("entities", () => {
     });
 
     it("should handle from() lower bound properly with all()", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const res = await Student.query().byIndex("age").from(20).all();
       expect(res).toStrictEqual(
         allStudents
@@ -119,7 +119,6 @@ describe("entities", () => {
     });
 
     it("should handle from() combined with to() bounds properly with all()", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const res = await Student.query().byIndex("age").from(19).to(20).all();
       expect(res).toStrictEqual(
         allStudents
@@ -129,9 +128,29 @@ describe("entities", () => {
     });
 
     it("should correctly group based on a key", async () => {
-      const Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
       const res = await Student.query().groupBy("age").all();
       expect(res).toEqual(studentsGroupedByAge);
+    });
+  });
+
+  describe("Entity.create", () => {
+    let Student: ORM.DbEntity<IStudent>;
+    beforeAll(() => {
+      Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
+    });
+    it("should correctly create entities", async () => {
+      const s = {
+        name: "Steve",
+        age: 999,
+        major: "Administration",
+      };
+      const res: IStudent = await Student.create(s);
+      expect(res).toEqual(s);
+      expect(
+        await Student.query()
+          .filter((s) => s.age === 999)
+          .one()
+      ).toStrictEqual(s);
     });
   });
 });
