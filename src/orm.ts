@@ -6,12 +6,12 @@ import {
   IDBPCursorWithValueIteratorValue,
 } from "idb";
 
-type DbHandle = IDBPDatabase<any>;
+export type DbHandle = IDBPDatabase<unknown>;
 
 type GroupKey = any;
 type GroupBy<T> = (item: T) => GroupKey;
 type Group<T> = T[];
-type GroupedItems<T> = Record<GroupKey, Group<T>>;
+export type GroupedItems<T> = Record<GroupKey, Group<T>>;
 interface Query<T> {
   _state: {
     tx: IDBTransaction | null;
@@ -26,9 +26,9 @@ interface Query<T> {
   };
   _isFilteredOut: (item: T) => boolean;
   _streamItems: () => AsyncGenerator<T>;
-  _streamGroups: (groupBy: GroupBy<T>) => AsyncGenerator<Group<T>>;
+  _streamGroups: (groupBy: GroupBy<T>) => AsyncGenerator<[GroupKey, Group<T>]>;
   _stream: () => AsyncGenerator<T | Group<T>>;
-  all: () => Promise<(T | Group<T>)[]>;
+  all: () => Promise<T[] | GroupedItems<T>>;
   one: () => Promise<T | Group<T> | null>;
   filter: (predicate: (item: T) => boolean) => Query<T>;
   byIndex: (indexName: string) => Query<T>;
@@ -36,7 +36,7 @@ interface Query<T> {
   to: (upperBound: any) => Query<T>;
   takeUntil: (predicate: (item: T) => boolean) => Query<T>;
   take: (n: number) => Query<T>;
-  groupBy: (f: GroupBy<T>) => Query<T>;
+  groupBy: (f: GroupBy<T> | keyof T) => Query<T>;
 }
 
 type QueryBuilder<T> = () => Query<T>;
@@ -76,7 +76,6 @@ export const createDbEntity = <T>(
         async *_streamItems() {
           let iterable: any;
           if (self._state.index !== null) {
-            console.log(self._state.range);
             iterable = self._state.index.iterate(self._state.range);
           } else {
             iterable = self._state.store;
@@ -95,8 +94,9 @@ export const createDbEntity = <T>(
           }
         },
 
-        async *_streamGroups(groupBy: GroupBy<T>) {
-          console.log("starting to stream groups");
+        async *_streamGroups(
+          groupBy: GroupBy<T>
+        ): AsyncGenerator<[string, Group<T>]> {
           const grouped: GroupedItems<T> = {};
           for await (const item of self._streamItems()) {
             const groupKey = groupBy(item);
@@ -107,10 +107,9 @@ export const createDbEntity = <T>(
             }
             group.push(item);
           }
-          console.log("GROUPED HERE");
-          console.log(grouped);
-          for (const group of Object.values(grouped)) {
-            yield group;
+          for (const k of Object.keys(grouped)) {
+            const group = grouped[k];
+            yield [k, group];
           }
         },
 
@@ -133,9 +132,15 @@ export const createDbEntity = <T>(
         },
 
         byIndex(idxName: string) {
-          const index = self._state.store.index(idxName);
-          self._state.index = index;
-          return self;
+          try {
+            const index = self._state.store.index(idxName);
+            self._state.index = index;
+            return self;
+          } catch (NotFoundError) {
+            throw {
+              error: `Index "${idxName}" does not exist on the store "${storeName}"`,
+            };
+          }
         },
 
         // Lower bound for index
@@ -171,8 +176,12 @@ export const createDbEntity = <T>(
           return self;
         },
 
-        groupBy(f: (item: T) => any) {
-          self._state.groupBy = f;
+        groupBy(funOrKey) {
+          if (!(funOrKey instanceof Function)) {
+            const key: keyof T = funOrKey;
+            funOrKey = (s: T) => s[key];
+          }
+          self._state.groupBy = funOrKey;
           return self;
         },
 
@@ -183,12 +192,22 @@ export const createDbEntity = <T>(
           }
         },
 
-        async all() {
-          let res = [];
-          for await (const item of self._stream()) {
-            res.push(item);
+        async all(): Promise<T[] | GroupedItems<T>> {
+          if (self._state.groupBy !== null) {
+            let res: GroupedItems<T> = {};
+            for await (const [k, items] of self._streamGroups(
+              self._state.groupBy
+            )) {
+              res[k] = items;
+            }
+            return res;
+          } else {
+            let res = [];
+            for await (const item of self._streamItems()) {
+              res.push(item);
+            }
+            return res;
           }
-          return res;
         },
       };
       self._state.tx = db.transaction(storeName, "readonly") as any;
