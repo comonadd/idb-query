@@ -62,8 +62,8 @@ const studentsGroupedByAge = allStudents.reduce((acc, s) => {
   return acc;
 }, new Map() as ORM.GroupedItems<IStudent>);
 
-const openIDB = async (): Promise<ORM.DbHandle> => {
-  return await openDB(DB_NAME, 1, {
+const openIDB = (): Promise<ORM.DbHandle> => {
+  return openDB(DB_NAME, 1, {
     upgrade(
       upgradeDb: any,
       oldVersion: any,
@@ -90,11 +90,11 @@ type AsyncReturnType<T extends (...args: any) => any> = T extends (
   ? U
   : any;
 
-let db: AsyncReturnType<typeof openIDB>;
+const db = openIDB();
 
 beforeAll(async () => {
-  db = await openIDB();
-  const tx = db.transaction(STORE_NAME, "readwrite");
+  const ddb = await db;
+  const tx = ddb.transaction(STORE_NAME, "readwrite");
   const sortedStudents = allStudents.sort(idComparator);
   for (const s of sortedStudents) {
     tx.store.put(s);

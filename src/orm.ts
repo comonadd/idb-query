@@ -22,7 +22,8 @@ interface Query<T> {
     filters: ((item: T) => boolean)[];
     groupFilters: GroupFilter<T>[];
     lowerBound: any | null;
-    index: IDBPIndex;
+    // index name to be used during the query execution
+    index: string;
     nLimit: number | null;
     needToStopHere: ((item: T) => boolean) | null;
     groupBy: GroupBy<T> | null;
@@ -37,27 +38,29 @@ interface Query<T> {
   to: (upperBound: any) => Query<T>;
   takeUntil: (predicate: (item: T) => boolean) => Query<T>;
   take: (n: number) => Query<T>;
-  groupBy: (f: GroupBy<T> | keyof T) => GroupedQuery<T>;
-  one: () => Promise<T | GroupInt<T> | null>;
-  all: () => Promise<T[] | GroupedItems<T>>;
+  groupBy: (f: ((item: T) => any) | keyof T) => GroupedQuery<T>;
+  one: () => Promise<T | null>;
+  all: () => Promise<T[]>;
   count: () => Promise<number>;
   delete: () => Promise<T[] | GroupInt<T>[]>;
 }
 
 type Modify<T, R> = Omit<T, keyof R> & R;
 
-interface GroupedQuery<T>
-  extends Modify<
-    Query<T>,
-    {
-      filter: (predicate: GroupFilter<T>) => Query<T>;
-    }
-  > {}
+type GroupedQuery<T> = Modify<
+  Query<T>,
+  {
+    take: (n: number) => GroupedQuery<T>;
+    filter: (predicate: GroupFilter<T>) => GroupedQuery<T>;
+    all: () => Promise<GroupedItems<T>>;
+    one: () => Promise<GroupInt<T> | null>;
+  }
+>;
 
 type QueryBuilder<T> = () => Query<T>;
 
 export interface DbEntity<T, KP extends keyof T> {
-  create: (o: Omit<T, KP>, key?: KP) => T | null;
+  create: (o: Omit<T, KP>, key?: KP) => Promise<T | null>;
   query: QueryBuilder<T>;
 }
 type Bound = any;
@@ -67,14 +70,15 @@ interface Options<T> {
 }
 
 export const createDbEntity = <T, KP extends keyof T>(
-  db: DbHandle,
+  db: Promise<DbHandle>,
   storeName: string,
   keyPath: KP
 ): DbEntity<T, KP> => {
   type Predicate = (item: T) => boolean;
   return {
-    create(s, key: KP = undefined) {
-      const tx = db.transaction(storeName, "readwrite");
+    async create(s, key: KP = undefined) {
+      const ddb = await db;
+      const tx = ddb.transaction(storeName, "readwrite");
       const store = tx.objectStore(storeName);
       if (store === undefined) {
         return null;
@@ -82,7 +86,7 @@ export const createDbEntity = <T, KP extends keyof T>(
       store.put(s, key);
       return s as T;
     },
-    query(): Query<T> {
+    query() {
       let self: Query<T> = {
         _state: {
           tx: null,
@@ -105,11 +109,21 @@ export const createDbEntity = <T, KP extends keyof T>(
         },
 
         async *_streamItems() {
+          const ddb = await db;
+          const tx = ddb.transaction(storeName, "readonly") as any;
+          const store = tx.objectStore(storeName) as any;
           let iterable: any;
           if (self._state.index !== null) {
-            iterable = self._state.index.iterate(self._state.range);
+            try {
+              const index = store.index(self._state.index);
+              iterable = index.iterate(self._state.range);
+            } catch (NotFoundError) {
+              throw {
+                error: `Index "${self._state.index}" does not exist on the store "${storeName}"`,
+              };
+            }
           } else {
-            iterable = self._state.store;
+            iterable = store;
           }
           for await (const cursor of iterable) {
             const item = cursor.value;
@@ -173,15 +187,8 @@ export const createDbEntity = <T, KP extends keyof T>(
         },
 
         byIndex(idxName: string) {
-          try {
-            const index = self._state.store.index(idxName);
-            self._state.index = index;
-            return self;
-          } catch (NotFoundError) {
-            throw {
-              error: `Index "${idxName}" does not exist on the store "${storeName}"`,
-            };
-          }
+          self._state.index = idxName;
+          return self;
         },
 
         // Lower bound for index
@@ -217,7 +224,7 @@ export const createDbEntity = <T, KP extends keyof T>(
           return self;
         },
 
-        groupBy(funOrKey) {
+        groupBy(funOrKey): GroupedQuery<T> {
           if (!(funOrKey instanceof Function)) {
             const key: keyof T = funOrKey;
             funOrKey = (s: T) => s[key] as any;
@@ -235,19 +242,19 @@ export const createDbEntity = <T, KP extends keyof T>(
         // Return the first item
         async one() {
           for await (const item of self._stream()) {
-            return item;
+            return item as any;
           }
           return null;
         },
 
-        async all(): Promise<T[] | GroupedItems<T>> {
+        async all() {
           if (self._state.groupBy !== null) {
             let res: GroupedItems<T> = new Map();
             for await (const i of self._stream()) {
               const [k, items] = i as GroupInt<T>;
               res.set(k, items);
             }
-            return res;
+            return res as any;
           } else {
             let res = [];
             for await (const item of self._stream()) {
@@ -268,31 +275,36 @@ export const createDbEntity = <T, KP extends keyof T>(
 
         // Delete all items matching the query
         async delete() {
-          const tx = db.transaction(storeName, "readwrite") as any;
-          const store = tx.objectStore(storeName) as any;
+          const ddb = await db;
           if (self._state.groupBy !== null) {
-            let deleted: GroupInt<T>[] = [];
+            let itemsToDelete: GroupInt<T>[] = [];
             for await (const [k, items] of self._streamGroups(
               self._state.groupBy
             )) {
+              itemsToDelete.push([k, items]);
+            }
+            const tx = ddb.transaction(storeName, "readwrite") as any;
+            const store = tx.objectStore(storeName) as any;
+            for (const [k, items] of itemsToDelete) {
               for (let item of items) {
                 store.delete(item[keyPath]);
               }
-              deleted.push([k, items]);
             }
-            return deleted;
+            return itemsToDelete;
           } else {
-            let deleted: T[] = [];
+            let itemsToDelete: T[] = [];
             for await (const item of self._streamItems()) {
-              store.delete(item[keyPath]);
-              deleted.push(item);
+              itemsToDelete.push(item);
             }
-            return deleted;
+            const tx = ddb.transaction(storeName, "readwrite") as any;
+            const store = tx.objectStore(storeName) as any;
+            for (const item of itemsToDelete) {
+              store.delete(item[keyPath]);
+            }
+            return itemsToDelete;
           }
         },
       };
-      self._state.tx = db.transaction(storeName, "readonly") as any;
-      self._state.store = self._state.tx.objectStore(storeName) as any;
       return self;
     },
   };
