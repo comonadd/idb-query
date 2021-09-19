@@ -103,14 +103,14 @@ beforeAll(async () => {
 
 describe("entity creation", () => {
   it("should not crash when creating an entity that exists", () => {
-    ORM.createDbEntity<IStudent, "id">(db, STORE_NAME, "id");
+    ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id");
   });
 });
 
 describe("entities", () => {
   let Student: ORM.DbEntity<IStudent, "id">;
   beforeAll(() => {
-    Student = ORM.createDbEntity<IStudent, "id">(db, STORE_NAME, "id");
+    Student = ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id");
   });
 
   describe("query", () => {

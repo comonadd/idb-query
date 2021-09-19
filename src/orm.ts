@@ -69,7 +69,7 @@ interface Options<T> {
   keyPath: keyof T;
 }
 
-export const createDbEntity = <T, KP extends keyof T>(
+export const createIDBEntity = <T, KP extends keyof T>(
   db: Promise<DbHandle>,
   storeName: string,
   keyPath: KP
@@ -310,4 +310,4 @@ export const createDbEntity = <T, KP extends keyof T>(
   };
 };
 
-export default { createDbEntity };
+export default { createIDBEntity };
