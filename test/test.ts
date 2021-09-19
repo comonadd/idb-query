@@ -3,6 +3,12 @@ require("fake-indexeddb/auto");
 import * as ORM from "../src/orm";
 import { openDB } from "idb/with-async-ittr-cjs.js";
 
+const arrayTake = (arr: any[], n: number) => {
+  let res: typeof arr = [];
+  for (let i = 0; i < n; ++i) res.push(arr[i]);
+  return res;
+};
+
 const DB_NAME = "test-db";
 const STORE_NAME = "test-store";
 
@@ -154,6 +160,13 @@ describe("entities", () => {
       );
     });
 
+    it("take() works correctly on non-grouped queries", async () => {
+      const n = 2;
+      const res = await Student.query().take(n).all();
+      const expected = arrayTake(allStudents, n);
+      expect(res).toEqual(expected);
+    });
+
     it("should correctly group based on a key", async () => {
       const res = await Student.query().groupBy("age").all();
       expect(res).toEqual(studentsGroupedByAge);
@@ -166,6 +179,17 @@ describe("entities", () => {
         .all();
       const expectedEntries = Array.from(studentsGroupedByAge.entries()).filter(
         ([k, _]) => (k as any) === 18
+      );
+      const expected = new Map(expectedEntries);
+      expect(res).toEqual(expected);
+    });
+
+    it("group + take works correctly", async () => {
+      const n = 2;
+      const res = await Student.query().groupBy("age").take(n).all();
+      const expectedEntries = arrayTake(
+        Array.from(studentsGroupedByAge.entries()),
+        n
       );
       const expected = new Map(expectedEntries);
       expect(res).toEqual(expected);

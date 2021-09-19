@@ -243,16 +243,15 @@ export const createDbEntity = <T, KP extends keyof T>(
         async all(): Promise<T[] | GroupedItems<T>> {
           if (self._state.groupBy !== null) {
             let res: GroupedItems<T> = new Map();
-            for await (const [k, items] of self._streamGroups(
-              self._state.groupBy
-            )) {
+            for await (const i of self._stream()) {
+              const [k, items] = i as GroupInt<T>;
               res.set(k, items);
             }
             return res;
           } else {
             let res = [];
-            for await (const item of self._streamItems()) {
-              res.push(item);
+            for await (const item of self._stream()) {
+              res.push(item as T);
             }
             return res;
           }
