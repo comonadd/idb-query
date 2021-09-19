@@ -28,8 +28,6 @@ interface Query<T> {
   _streamItems: () => AsyncGenerator<T>;
   _streamGroups: (groupBy: GroupBy<T>) => AsyncGenerator<[GroupKey, Group<T>]>;
   _stream: () => AsyncGenerator<T | Group<T>>;
-  all: () => Promise<T[] | GroupedItems<T>>;
-  one: () => Promise<T | Group<T> | null>;
   filter: (predicate: (item: T) => boolean) => Query<T>;
   byIndex: (indexName: string) => Query<T>;
   from: (lowerBound: any) => Query<T>;
@@ -37,6 +35,9 @@ interface Query<T> {
   takeUntil: (predicate: (item: T) => boolean) => Query<T>;
   take: (n: number) => Query<T>;
   groupBy: (f: GroupBy<T> | keyof T) => Query<T>;
+  one: () => Promise<T | Group<T> | null>;
+  all: () => Promise<T[] | GroupedItems<T>>;
+  count: () => Promise<number>;
 }
 
 type QueryBuilder<T> = () => Query<T>;
@@ -219,6 +220,14 @@ export const createDbEntity = <T>(
             }
             return res;
           }
+        },
+
+        async count() {
+          let k = 0;
+          for await (const _ of self._stream()) {
+            ++k;
+          }
+          return k;
         },
       };
       self._state.tx = db.transaction(storeName, "readonly") as any;

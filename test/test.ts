@@ -131,6 +131,18 @@ describe("entities", () => {
       const res = await Student.query().groupBy("age").all();
       expect(res).toEqual(studentsGroupedByAge);
     });
+
+    it("should return the length of items on count()", async () => {
+      const res = await Student.query()
+        .filter((s) => s.age < 20)
+        .count();
+      expect(res).toEqual(teenageStudents.length);
+    });
+
+    it("should return the length of items on count() with groupBy()", async () => {
+      const res = await Student.query().groupBy("age").count();
+      expect(res).toEqual(Object.keys(studentsGroupedByAge).length);
+    });
   });
 
   describe("Entity.create", () => {
