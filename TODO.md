@@ -1,0 +1,3 @@
+- Add examples
+- Improve README
+- Typechecking for index keys. Maybe requires a wrapper around openIDB()
