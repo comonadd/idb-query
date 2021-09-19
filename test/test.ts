@@ -7,29 +7,54 @@ const DB_NAME = "test-db";
 const STORE_NAME = "test-store";
 
 interface IStudent {
+  id: number;
   name: string;
   age: number;
   major: string;
 }
 
-const teenageStudents: IStudent[] = [
-  { name: "William", age: 19, major: "Arts" },
-  { name: "Donald", age: 18, major: "Business" },
-];
+const idComparator = (a: IStudent, b: IStudent) =>
+  a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
 
-const allStudents: IStudent[] = [
-  ...teenageStudents,
+let __id = 1;
+const withId = (i: Omit<IStudent, "id">) => {
+  if ((i as any).id !== undefined) return i as IStudent;
+  const s = { id: __id, ...i };
+  __id++;
+  return s;
+};
+
+const withIds = (is: Omit<IStudent, "id">[]) => is.map(withId);
+
+const donald: IStudent = withId({
+  name: "Donald",
+  age: 18,
+  major: "Business",
+});
+
+const teenageStudents: IStudent[] = withIds([
+  { name: "William", age: 19, major: "Arts" },
+  ...[donald],
+]).sort(idComparator);
+
+const twentyYearOlds: IStudent[] = withIds([
   { name: "John", age: 20, major: "Computer Science" },
+  { name: "Franklin", age: 20, major: "History" },
+]);
+
+const allStudents: IStudent[] = withIds([
+  ...teenageStudents,
+  ...twentyYearOlds,
   { name: "Adam", age: 22, major: "Math" },
-];
+]);
 
 const studentsGroupedByAge = allStudents.reduce((acc, s) => {
-  if (acc[s.age] === undefined) {
-    acc[s.age] = [];
+  if (acc.get(s.age) === undefined) {
+    acc.set(s.age, []);
   }
-  acc[s.age].push(s);
+  acc.get(s.age).push(s);
   return acc;
-}, {} as ORM.GroupedItems<IStudent>);
+}, new Map() as ORM.GroupedItems<IStudent>);
 
 const openIDB = async (): Promise<ORM.DbHandle> => {
   return await openDB(DB_NAME, 1, {
@@ -41,6 +66,7 @@ const openIDB = async (): Promise<ORM.DbHandle> => {
     ) {
       if (!upgradeDb.objectStoreNames.contains(STORE_NAME)) {
         const tiDb = upgradeDb.createObjectStore(STORE_NAME, {
+          keyPath: "id",
           autoIncrement: true,
         });
         tiDb.createIndex("name", "name", { unique: false });
@@ -63,24 +89,25 @@ let db: AsyncReturnType<typeof openIDB>;
 beforeAll(async () => {
   db = await openIDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
-  for (const s of allStudents) {
+  const sortedStudents = allStudents.sort(idComparator);
+  for (const s of sortedStudents) {
     tx.store.put(s);
   }
 });
 
+describe("entity creation", () => {
+  it("should not crash when creating an entity that exists", () => {
+    ORM.createDbEntity<IStudent, "id">(db, STORE_NAME, "id");
+  });
+});
+
 describe("entities", () => {
-  describe("creation", () => {
-    it("should not crash when creating an entity that exists", () => {
-      ORM.createDbEntity(db, STORE_NAME);
-    });
+  let Student: ORM.DbEntity<IStudent, "id">;
+  beforeAll(() => {
+    Student = ORM.createDbEntity<IStudent, "id">(db, STORE_NAME, "id");
   });
 
   describe("query", () => {
-    let Student: ORM.DbEntity<IStudent>;
-    beforeAll(() => {
-      Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
-    });
-
     it("should return all entities on all()", async () => {
       const res = await Student.query().all();
       expect(res).toEqual(allStudents);
@@ -132,6 +159,18 @@ describe("entities", () => {
       expect(res).toEqual(studentsGroupedByAge);
     });
 
+    it("should correctly group and filter based on a key", async () => {
+      const res = await Student.query()
+        .groupBy("age")
+        .filter((age, students) => age === 18)
+        .all();
+      const expectedEntries = Array.from(studentsGroupedByAge.entries()).filter(
+        ([k, _]) => (k as any) === 18
+      );
+      const expected = new Map(expectedEntries);
+      expect(res).toEqual(expected);
+    });
+
     it("should return the length of items on count()", async () => {
       const res = await Student.query()
         .filter((s) => s.age < 20)
@@ -141,21 +180,42 @@ describe("entities", () => {
 
     it("should return the length of items on count() with groupBy()", async () => {
       const res = await Student.query().groupBy("age").count();
-      expect(res).toEqual(Object.keys(studentsGroupedByAge).length);
+      expect(res).toEqual(Array.from(studentsGroupedByAge.keys()).length);
+    });
+
+    it("should delete single items matched by query correctly", async () => {
+      const res = await Student.query()
+        .filter((s) => s.age === 18)
+        .delete();
+      expect(res).toEqual([donald]);
+      expect(
+        await Student.query()
+          .filter((s) => s.age === 18)
+          .one()
+      ).toEqual(null);
+    });
+
+    it("should delete groups matched by query correctly", async () => {
+      const res = await Student.query()
+        .groupBy("age")
+        .filter((k, items) => k === 20)
+        .delete();
+      expect(res).toEqual([[20, twentyYearOlds]]);
+      expect(
+        await Student.query()
+          .filter((s) => s.age === 20)
+          .one()
+      ).toEqual(null);
     });
   });
 
   describe("Entity.create", () => {
-    let Student: ORM.DbEntity<IStudent>;
-    beforeAll(() => {
-      Student = ORM.createDbEntity<IStudent>(db, STORE_NAME);
-    });
     it("should correctly create entities", async () => {
-      const s = {
+      const s = withId({
         name: "Steve",
         age: 999,
         major: "Administration",
-      };
+      });
       const res: IStudent = await Student.create(s);
       expect(res).toEqual(s);
       expect(
