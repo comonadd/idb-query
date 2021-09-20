@@ -107,6 +107,24 @@ describe("entity creation", () => {
   });
 });
 
+const studentsCompAsc = (a: IStudent, b: IStudent) =>
+  a.age > b.age
+    ? 1
+    : a.age < b.age
+    ? -1
+    : a.id > b.id
+    ? 1
+    : a.id < b.id
+    ? -1
+    : 0;
+
+const studentsCompDesc = (a: IStudent, b: IStudent) => {
+  const res = studentsCompAsc(a, b);
+  if (res === -1) return 1;
+  if (res === 1) return -1;
+  return 0;
+};
+
 describe("entities", () => {
   let Student: ORM.DbEntity<IStudent, "id">;
   beforeAll(() => {
@@ -128,9 +146,16 @@ describe("entities", () => {
 
     it("should sort if byIndex() is applied with all()", async () => {
       const res = await Student.query().byIndex("age").all();
-      expect(res).toStrictEqual(
-        allStudents.sort((a, b) => (a.age > b.age ? 1 : a.age < b.age ? -1 : 0))
+      const expected = allStudents.sort((a, b) =>
+        a.age > b.age ? 1 : a.age < b.age ? -1 : 0
       );
+      expect(res).toStrictEqual(expected);
+    });
+
+    it("should sort in descending order properly if desc() is applied with all()", async () => {
+      const res = await Student.query().byIndex("age").desc().all();
+      const expected = allStudents.sort(studentsCompDesc);
+      expect(res).toStrictEqual(expected);
     });
 
     it("should fail if specified index in byIndex() does not exist", async () => {
@@ -145,31 +170,46 @@ describe("entities", () => {
     it("should handle from() lower bound properly with all()", async () => {
       const res = await Student.query().byIndex("age").from(20).all();
       expect(res).toStrictEqual(
-        allStudents
-          .filter((a) => a.age >= 20)
-          .sort((a, b) => (a.age > b.age ? 1 : a.age < b.age ? -1 : 0))
+        allStudents.filter((a) => a.age >= 20).sort(studentsCompAsc)
       );
     });
 
     it("should handle from() combined with to() bounds properly with all()", async () => {
       const res = await Student.query().byIndex("age").from(19).to(20).all();
-      expect(res).toStrictEqual(
-        allStudents
-          .filter((a) => a.age >= 19 && a.age <= 20)
-          .sort((a, b) => (a.age > b.age ? 1 : a.age < b.age ? -1 : 0))
-      );
+      const expected = allStudents
+        .filter((a) => a.age >= 19 && a.age <= 20)
+        .sort(studentsCompAsc);
+      expect(res).toStrictEqual(expected);
     });
 
     it("take() works correctly on non-grouped queries", async () => {
       const n = 2;
-      const res = await Student.query().take(n).all();
-      const expected = arrayTake(allStudents, n);
+      const res = await Student.query().asc().take(n).all();
+      const expected = arrayTake(allStudents.sort(studentsCompAsc), n);
       expect(res).toEqual(expected);
     });
 
     it("should correctly group based on a key", async () => {
       const res = await Student.query().groupBy("age").all();
       expect(res).toEqual(studentsGroupedByAge);
+    });
+
+    it("should correctly group based on a key and sort in descending order", async () => {
+      const res = await Student.query()
+        .byIndex("age")
+        .from(20)
+        .desc()
+        .groupBy((item) => {
+          return item.age;
+        })
+        .all();
+      const expected = new Map(
+        Array.from(studentsGroupedByAge.entries())
+          .map(([k, e]) => [k, e.reverse()] as any)
+          .filter(([k, _]) => k <= 20)
+          .reverse()
+      );
+      expect(res).toEqual(expected);
     });
 
     it("should correctly group and filter based on a key", async () => {

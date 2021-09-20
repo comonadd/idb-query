@@ -18,15 +18,16 @@ interface Query<T> {
   _state: {
     tx: IDBTransaction | null;
     store: IDBPObjectStore | null;
-    range: IDBKeyRange | null;
     filters: ((item: T) => boolean)[];
     groupFilters: GroupFilter<T>[];
     lowerBound: any | null;
+    upperBound: any | null;
     // index name to be used during the query execution
     index: string;
     nLimit: number | null;
     needToStopHere: ((item: T) => boolean) | null;
     groupBy: GroupBy<T> | null;
+    order: "next" | "prev";
   };
   _isFilteredOut: (item: T) => boolean;
   _streamItems: () => AsyncGenerator<T>;
@@ -40,6 +41,8 @@ interface Query<T> {
   take: (n: number) => Query<T>;
   groupBy: (f: ((item: T) => any) | keyof T) => GroupedQuery<T>;
   one: () => Promise<T | null>;
+  asc: () => Query<T>;
+  desc: () => Query<T>;
   all: () => Promise<T[]>;
   count: () => Promise<number>;
   delete: () => Promise<T[] | GroupInt<T>[]>;
@@ -52,6 +55,8 @@ type GroupedQuery<T> = Modify<
   {
     take: (n: number) => GroupedQuery<T>;
     filter: (predicate: GroupFilter<T>) => GroupedQuery<T>;
+    asc: () => GroupedQuery<T>;
+    desc: () => GroupedQuery<T>;
     all: () => Promise<GroupedItems<T>>;
     one: () => Promise<GroupInt<T> | null>;
   }
@@ -91,14 +96,15 @@ export const createIDBEntity = <T, KP extends keyof T>(
         _state: {
           tx: null,
           store: null,
-          range: null,
           index: null,
           lowerBound: null,
+          upperBound: null,
           filters: [],
           groupFilters: [],
           nLimit: null,
           groupBy: null,
           needToStopHere: null,
+          order: "next",
         },
 
         _isFilteredOut(item: T) {
@@ -114,10 +120,40 @@ export const createIDBEntity = <T, KP extends keyof T>(
           const store = tx.objectStore(storeName) as any;
           let iterable: any;
           if (self._state.index !== null) {
+            const order = self._state.order;
+            let range = null;
+            const lowerBound =
+              self._state.order === "next"
+                ? self._state.lowerBound
+                : self._state.upperBound;
+            const upperBound =
+              self._state.order === "next"
+                ? self._state.upperBound
+                : self._state.lowerBound;
+            if (lowerBound && upperBound) {
+              range = IDBKeyRange.bound(lowerBound, upperBound);
+            } else if (lowerBound) {
+              range = IDBKeyRange.lowerBound(lowerBound);
+            } else if (upperBound) {
+              range = IDBKeyRange.upperBound(upperBound);
+            }
             try {
-              const index = store.index(self._state.index);
-              iterable = index.iterate(self._state.range);
-            } catch (NotFoundError) {
+              let c = await store
+                .index(self._state.index)
+                .openCursor(range, order);
+              iterable = {
+                [Symbol.asyncIterator]() {
+                  return {
+                    async next() {
+                      if (!c || c.value === undefined) return { done: true };
+                      const res = { done: false, value: { value: c.value } };
+                      c = await c.continue();
+                      return res;
+                    },
+                  };
+                },
+              };
+            } catch (e) {
               throw {
                 error: `Index "${self._state.index}" does not exist on the store "${storeName}"`,
               };
@@ -194,17 +230,22 @@ export const createIDBEntity = <T, KP extends keyof T>(
         // Lower bound for index
         from(b: Bound) {
           self._state.lowerBound = b;
-          self._state.range = IDBKeyRange.lowerBound(b);
           return self;
         },
 
         // Upper bound for index
         to(b: Bound) {
-          if (self._state.range === null) {
-            self._state.range = IDBKeyRange.upperBound(b);
-          } else {
-            self._state.range = IDBKeyRange.bound(self._state.lowerBound, b);
-          }
+          self._state.upperBound = b;
+          return self;
+        },
+
+        asc() {
+          self._state.order = "next";
+          return self;
+        },
+
+        desc() {
+          self._state.order = "prev";
           return self;
         },
 
