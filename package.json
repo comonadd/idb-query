@@ -1,5 +1,5 @@
 {
-  "name": "idb-orm",
+  "name": "idb-query",
   "version": "1.0.0",
   "description": "Simple IDB ORM ",
   "main": "./build/orm.min.js",
@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/comonadd/idb-orm.git"
+    "url": "git+https://github.com/comonadd/idb-query.git"
   },
   "keywords": [
     "idb",
@@ -27,9 +27,9 @@
   "author": "Dmitry Guzeev <dmitri.guzeev@gmail.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/comonadd/idb-orm/issues"
+    "url": "https://github.com/comonadd/idb-query/issues"
   },
-  "homepage": "https://github.com/comonadd/idb-orm#readme",
+  "homepage": "https://github.com/comonadd/idb-query#readme",
   "dependencies": {
     "idb": "^6.1.3"
   },
