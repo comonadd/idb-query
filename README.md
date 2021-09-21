@@ -15,7 +15,8 @@ interface IArticle {
   text: string;
   tags: string[];
 }
-const Student = createIDBEntity<IStudent>(
+const Student = createIDBEntity<IStudent, "id">(
+  db, // need to provide database handle
   "students", // store name
   "id" // keyPath
 );
@@ -63,3 +64,5 @@ Student.query()
   .take(10)
   .all();
 ```
+
+More usage examples can be found in the [tests](./test) directory.

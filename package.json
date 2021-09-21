@@ -1,8 +1,9 @@
 {
   "name": "idb-query",
-  "version": "1.0.0",
-  "description": "Simple IDB ORM ",
+  "version": "1.0.2",
+  "description": "Simple IDB query library with TypeScript support",
   "main": "./build/orm.min.js",
+  "browser": "./build/orm.min.js",
   "module": "./build/orm-esm.js",
   "types": "./build/orm.d.ts",
   "directories": {
