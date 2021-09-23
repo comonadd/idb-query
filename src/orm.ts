@@ -14,7 +14,7 @@ type Group<T> = T[];
 export type GroupedItems<T> = Map<GroupKey<T>, Group<T>>;
 type GroupInt<T> = [GroupKey<T>, Group<T>];
 type GroupFilter<T> = (groupKey: GroupKey<T>, groupItems: Group<T>) => boolean;
-interface Query<T> {
+type Query<T> = {
   _state: {
     tx: IDBTransaction | null;
     store: IDBPObjectStore | null;
@@ -46,17 +46,33 @@ interface Query<T> {
   all: () => Promise<T[]>;
   count: () => Promise<number>;
   delete: () => Promise<T[] | GroupInt<T>[]>;
-}
+};
 
 type Modify<T, R> = Omit<T, keyof R> & R;
 
+type FunctionPropertyNames<T> = {
+  [K in keyof T]: T[K] extends Function ? K : never;
+}[keyof T];
+type FunctionProperties<T> = Pick<T, FunctionPropertyNames<T>>;
+type QueryMethods<T> = Omit<
+  FunctionProperties<Query<T>>,
+  | "_isFilteredOut"
+  | "_streamItems"
+  | "_streamGroups"
+  | "_stream"
+  | "all"
+  | "count"
+  | "delete"
+>;
 type GroupedQuery<T> = Modify<
-  Query<T>,
+  Query<T> &
+    {
+      [Property in keyof QueryMethods<T>]: (
+        ...args: Parameters<QueryMethods<T>[Property]>
+      ) => GroupedQuery<T>;
+    },
   {
-    take: (n: number) => GroupedQuery<T>;
     filter: (predicate: GroupFilter<T>) => GroupedQuery<T>;
-    asc: () => GroupedQuery<T>;
-    desc: () => GroupedQuery<T>;
     all: () => Promise<GroupedItems<T>>;
     one: () => Promise<GroupInt<T> | null>;
   }
@@ -82,37 +98,31 @@ export const createIDBEntity = <T, KP extends keyof T>(
   keyPath: KP
 ): DbEntity<T, KP> => {
   type Predicate = (item: T) => boolean;
+  const getStore = async (mode: "readwrite" | "readonly") => {
+    const ddb = await db;
+    const tx = ddb.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    if (store === undefined) {
+      return null;
+    }
+    return store;
+  };
   return {
     async create(s, key: KP = undefined) {
-      const ddb = await db;
-      const tx = ddb.transaction(storeName, "readwrite");
-      const store = tx.objectStore(storeName);
-      if (store === undefined) {
-        return null;
-      }
+      const store = await getStore("readwrite");
       store.put(s, key);
       return s as T;
     },
 
     async replace(key: T[KP], payload: Omit<T, KP>) {
-      const ddb = await db;
-      const tx = ddb.transaction(storeName, "readwrite");
-      const store = tx.objectStore(storeName);
-      if (store === undefined) {
-        return null;
-      }
+      const store = await getStore("readwrite");
       const newObj: T = { [keyPath as KP]: key, ...payload } as any;
       await store.put(newObj);
       return newObj;
     },
 
     async update(key, payload) {
-      const ddb = await db;
-      const tx = ddb.transaction(storeName, "readwrite");
-      const store = tx.objectStore(storeName);
-      if (store === undefined) {
-        return null;
-      }
+      const store = await getStore("readwrite");
       const existing = await store.get(key as any);
       const newObj = { [keyPath]: key, ...existing, ...payload };
       await store.put(newObj);
@@ -143,9 +153,7 @@ export const createIDBEntity = <T, KP extends keyof T>(
         },
 
         async *_streamItems() {
-          const ddb = await db;
-          const tx = ddb.transaction(storeName, "readonly") as any;
-          const store = tx.objectStore(storeName) as any;
+          const store = await getStore("readonly");
           let iterable: any;
           if (self._state.index !== null) {
             const order = self._state.order;
@@ -344,7 +352,6 @@ export const createIDBEntity = <T, KP extends keyof T>(
 
         // Delete all items matching the query
         async delete() {
-          const ddb = await db;
           if (self._state.groupBy !== null) {
             let itemsToDelete: GroupInt<T>[] = [];
             for await (const [k, items] of self._streamGroups(
@@ -352,11 +359,10 @@ export const createIDBEntity = <T, KP extends keyof T>(
             )) {
               itemsToDelete.push([k, items]);
             }
-            const tx = ddb.transaction(storeName, "readwrite") as any;
-            const store = tx.objectStore(storeName) as any;
+            const store = await getStore("readwrite");
             for (const [k, items] of itemsToDelete) {
               for (let item of items) {
-                store.delete(item[keyPath]);
+                store.delete(item[keyPath] as any);
               }
             }
             return itemsToDelete;
@@ -365,10 +371,9 @@ export const createIDBEntity = <T, KP extends keyof T>(
             for await (const item of self._streamItems()) {
               itemsToDelete.push(item);
             }
-            const tx = ddb.transaction(storeName, "readwrite") as any;
-            const store = tx.objectStore(storeName) as any;
+            const store = await getStore("readwrite");
             for (const item of itemsToDelete) {
-              store.delete(item[keyPath]);
+              store.delete(item[keyPath] as any);
             }
             return itemsToDelete;
           }
