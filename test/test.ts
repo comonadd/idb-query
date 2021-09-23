@@ -311,8 +311,9 @@ describe("entities", () => {
       Student.replace(studentGot.id, newStudent);
       const studentAfterUpdate = await Student.query()
         .filter(({ id }) => id === s.id)
-        .one();
-      expect(studentAfterUpdate).toStrictEqual({
+        .all();
+      expect(studentAfterUpdate.length).toEqual(1);
+      expect(studentAfterUpdate[0]).toStrictEqual({
         id: s.id,
         ...newStudent,
       });
@@ -335,8 +336,9 @@ describe("entities", () => {
       Student.update(studentGot.id, { major: "Administration" });
       const studentAfterUpdate = await Student.query()
         .filter(({ id }) => id === s.id)
-        .one();
-      expect(studentAfterUpdate).toStrictEqual({
+        .all();
+      expect(studentAfterUpdate.length).toEqual(1);
+      expect(studentAfterUpdate[0]).toStrictEqual({
         ...s,
         major: "Administration",
       });
