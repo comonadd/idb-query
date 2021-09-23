@@ -66,6 +66,8 @@ type QueryBuilder<T> = () => Query<T>;
 
 export interface DbEntity<T, KP extends keyof T> {
   create: (o: Omit<T, KP>, key?: KP) => Promise<T | null>;
+  replace: (key: T[KP], payload: Omit<T, KP>) => Promise<T>;
+  update: (key: T[KP], payload: Partial<T>) => Promise<T>;
   query: QueryBuilder<T>;
 }
 type Bound = any;
@@ -91,6 +93,32 @@ export const createIDBEntity = <T, KP extends keyof T>(
       store.put(s, key);
       return s as T;
     },
+
+    async replace(key: T[KP], payload: Omit<T, KP>) {
+      const ddb = await db;
+      const tx = ddb.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      if (store === undefined) {
+        return null;
+      }
+      const newObj: T = { [keyPath as KP]: key, ...payload } as any;
+      await store.put(newObj);
+      return newObj;
+    },
+
+    async update(key, payload) {
+      const ddb = await db;
+      const tx = ddb.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      if (store === undefined) {
+        return null;
+      }
+      const existing = await store.get(key as any);
+      const newObj = { [keyPath]: key, ...existing, ...payload };
+      await store.put(newObj);
+      return newObj;
+    },
+
     query() {
       let self: Query<T> = {
         _state: {

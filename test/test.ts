@@ -289,4 +289,57 @@ describe("entities", () => {
       ).toStrictEqual(s);
     });
   });
+
+  describe("Entity.replace", () => {
+    it("should replace existing entities", async () => {
+      const s = withId({
+        name: "Martin",
+        age: 823,
+        major: "Computer Science",
+      });
+      const res: IStudent = await Student.create(s);
+      expect(res).toEqual(s);
+      const studentGot = await Student.query()
+        .filter((sk) => sk.id === s.id)
+        .one();
+      expect(studentGot).toStrictEqual(s);
+      const newStudent = {
+        age: 111,
+        name: "Jonathan",
+        major: "Administration",
+      };
+      Student.replace(studentGot.id, newStudent);
+      const studentAfterUpdate = await Student.query()
+        .filter(({ id }) => id === s.id)
+        .one();
+      expect(studentAfterUpdate).toStrictEqual({
+        id: s.id,
+        ...newStudent,
+      });
+    });
+  });
+
+  describe("Entity.update", () => {
+    it("should update existing entities", async () => {
+      const s = withId({
+        name: "Martin",
+        age: 823,
+        major: "Computer Science",
+      });
+      const res: IStudent = await Student.create(s);
+      expect(res).toEqual(s);
+      const studentGot = await Student.query()
+        .filter((sk) => sk.id === s.id)
+        .one();
+      expect(studentGot).toStrictEqual(s);
+      Student.update(studentGot.id, { major: "Administration" });
+      const studentAfterUpdate = await Student.query()
+        .filter(({ id }) => id === s.id)
+        .one();
+      expect(studentAfterUpdate).toStrictEqual({
+        ...s,
+        major: "Administration",
+      });
+    });
+  });
 });
