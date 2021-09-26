@@ -11,7 +11,7 @@
     "moduleResolution": "node",
     "noImplicitAny": true,
     "preserveConstEnums": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "keyofStringsOnly": true,
     "lib": ["DOM", "es2020"],
     "declaration": true,
@@ -21,6 +21,6 @@
       "~/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts"],
   "exclude": ["node_modules"]
 }

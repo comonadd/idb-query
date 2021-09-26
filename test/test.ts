@@ -1,7 +1,7 @@
 require("fake-indexeddb/auto");
 
 import * as ORM from "../src/orm";
-import { openDB } from "idb/with-async-ittr-cjs.js";
+import { openDB, unwrap } from "idb/with-async-ittr-cjs.js";
 
 const arrayTake = (arr: any[], n: number) => {
   let res: typeof arr = [];
@@ -82,6 +82,32 @@ const openIDB = (): Promise<ORM.DbHandle> => {
   });
 };
 
+// const openIDB = (): Promise<any> => {
+//   return new Promise((resolve, reject) => {
+//     let DBOpenRequest = indexedDB.open(DB_NAME, 1);
+//     DBOpenRequest.onerror = function (event) {
+//       reject(event);
+//     };
+//     let db;
+//     DBOpenRequest.onsuccess = function (event) {
+//       db = DBOpenRequest.result;
+//       resolve(db);
+//     };
+//     DBOpenRequest.onupgradeneeded = function (event: any) {
+//       let db = event.target.result;
+//       db.onerror = function (event: any) {
+//         reject(event);
+//       };
+//       const objectStore = db.createObjectStore(STORE_NAME, {
+//         keyPath: "id",
+//         autoIncrement: true,
+//       });
+//       objectStore.createIndex("age", "age", { unique: false });
+//       objectStore.createIndex("name", "name", { unique: false });
+//     };
+//   });
+// };
+//
 type AsyncReturnType<T extends (...args: any) => any> = T extends (
   ...args: any
 ) => Promise<infer U>
@@ -96,14 +122,15 @@ beforeAll(async () => {
   const ddb = await db;
   const tx = ddb.transaction(STORE_NAME, "readwrite");
   const sortedStudents = allStudents.sort(idComparator);
+  const store = tx.objectStore(STORE_NAME);
   for (const s of sortedStudents) {
-    tx.store.put(s);
+    store.put(s);
   }
 });
 
 describe("entity creation", () => {
   it("should not crash when creating an entity that exists", () => {
-    ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id");
+    ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id", unwrap);
   });
 });
 
@@ -128,7 +155,7 @@ const studentsCompDesc = (a: IStudent, b: IStudent) => {
 describe("entities", () => {
   let Student: ORM.DbEntity<IStudent, "id">;
   beforeAll(() => {
-    Student = ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id");
+    Student = ORM.createIDBEntity<IStudent, "id">(db, STORE_NAME, "id", unwrap);
   });
 
   describe("query", () => {

@@ -1,11 +1,11 @@
 {
   "name": "idb-query",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "Simple IDB query library with TypeScript support",
   "main": "./build/orm.min.js",
   "browser": "./build/orm.min.js",
   "module": "./build/orm-esm.js",
-  "types": "./build/orm.d.ts",
+  "types": "./build/src/orm.d.ts",
   "files": [
     "build"
   ],
@@ -14,7 +14,9 @@
   },
   "scripts": {
     "test": "jest",
-    "build": "cross-env NODE_ENV=production rollup -c rollup.config.js"
+    "build": "cross-env NODE_ENV=production rollup -c rollup.config.js",
+    "build-dev": "cross-env NODE_ENV=development rollup -c rollup.config.js",
+    "build-prof": "cross-env NODE_ENV=development PROFILE=1 rollup -c rollup.config.js"
   },
   "repository": {
     "type": "git",
@@ -34,10 +36,8 @@
     "url": "https://github.com/comonadd/idb-query/issues"
   },
   "homepage": "https://github.com/comonadd/idb-query#readme",
-  "dependencies": {
-    "idb": "^6.1.3"
-  },
   "devDependencies": {
+    "idb": "^6.1.3",
     "@rollup/plugin-commonjs": "^20.0.0",
     "@rollup/plugin-typescript": "^8.2.5",
     "@types/jest": "^27.0.1",

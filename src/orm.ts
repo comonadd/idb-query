@@ -1,12 +1,11 @@
-import * as idb from "idb/with-async-ittr.js";
-import {
-  IDBPDatabase,
-  IDBPIndex,
-  IDBPObjectStore,
-  IDBPCursorWithValueIteratorValue,
-} from "idb";
+// import {
+//   IDBPDatabase,
+//   IDBPIndex,
+//   IDBPObjectStore,
+//   IDBPCursorWithValueIteratorValue,
+// } from "idb";
 
-export type DbHandle = IDBPDatabase<unknown>;
+export type DbHandle = any;
 
 type GroupKey<T> = any;
 type GroupBy<T> = (item: T) => GroupKey<T>;
@@ -17,7 +16,7 @@ type GroupFilter<T> = (groupKey: GroupKey<T>, groupItems: Group<T>) => boolean;
 type Query<T> = {
   _state: {
     tx: IDBTransaction | null;
-    store: IDBPObjectStore | null;
+    store: any | null;
     filters: ((item: T) => boolean)[];
     groupFilters: GroupFilter<T>[];
     lowerBound: any | null;
@@ -32,6 +31,7 @@ type Query<T> = {
   _isFilteredOut: (item: T) => boolean;
   _streamItems: () => AsyncGenerator<T>;
   _streamGroups: (groupBy: GroupBy<T>) => AsyncGenerator<GroupInt<T>>;
+  _determineRange: () => IDBKeyRange;
   _stream: () => AsyncGenerator<T | GroupInt<T>>;
   filter: (predicate: (item: T) => boolean) => Query<T>;
   byIndex: (indexName: string) => Query<T>;
@@ -54,21 +54,21 @@ type FunctionPropertyNames<T> = {
   [K in keyof T]: T[K] extends Function ? K : never;
 }[keyof T];
 type FunctionProperties<T> = Pick<T, FunctionPropertyNames<T>>;
-type QueryMethods<T> = Omit<
-  FunctionProperties<Query<T>>,
-  | "_isFilteredOut"
-  | "_streamItems"
-  | "_streamGroups"
-  | "_stream"
-  | "all"
-  | "count"
-  | "delete"
->;
-type GroupedQuery<T> = Modify<
-  Query<T> &
+export type GroupedQuery<T> = Modify<
+  Omit<Query<T>, "take" | "desc"> &
     {
-      [Property in keyof QueryMethods<T>]: (
-        ...args: Parameters<QueryMethods<T>[Property]>
+      [Property in keyof FunctionProperties<Query<T>> as Exclude<
+        Property,
+        | "_isFilteredOut"
+        | "_streamItems"
+        | "_streamGroups"
+        | "_stream"
+        | "_determineRange"
+        | "all"
+        | "count"
+        | "delete"
+      >]: (
+        ...args: Parameters<FunctionProperties<Query<T>>[Property]>
       ) => GroupedQuery<T>;
     },
   {
@@ -78,10 +78,11 @@ type GroupedQuery<T> = Modify<
   }
 >;
 
-type QueryBuilder<T> = () => Query<T>;
+export type QueryBuilder<T> = () => Query<T>;
 
 export interface DbEntity<T, KP extends keyof T> {
   create: (o: Omit<T, KP>, key?: KP) => Promise<T | null>;
+  createMany: (items: T[]) => Promise<boolean>;
   replace: (key: T[KP], payload: Omit<T, KP>) => Promise<T>;
   update: (key: T[KP], payload: Partial<T>) => Promise<T>;
   query: QueryBuilder<T>;
@@ -92,21 +93,40 @@ interface Options<T> {
   keyPath: keyof T;
 }
 
+type Unwrap = (db: any) => any;
+
+/**
+ * Creates an entity that can be later queried.
+ *
+ * @param ddb - Promise that returns the database handler
+ * @param storeName - The name of the store that this entity operates on
+ * @param keyPath - Key for entity (the one you specified during database upgrade)
+ * @param unwrap - Required if you are using the "idb" library
+ *                 (https://github.com/jakearchibald/idb). Transformes the enhanced
+ *                 object into a default one. Import unwrap from "idb" package and
+ *                 then pass here.
+ * @returns wrapped entity
+ */
 export const createIDBEntity = <T, KP extends keyof T>(
-  db: Promise<DbHandle>,
+  ddb: Promise<DbHandle>,
   storeName: string,
-  keyPath: KP
+  keyPath: KP,
+  unwrap: Unwrap | null = null
 ): DbEntity<T, KP> => {
   type Predicate = (item: T) => boolean;
-  const getStore = async (mode: "readwrite" | "readonly") => {
-    const ddb = await db;
-    const tx = ddb.transaction(storeName, mode);
-    const store = tx.objectStore(storeName);
-    if (store === undefined) {
-      return null;
+  type Mode = "readwrite" | "readonly";
+  type Store = any;
+  let stores: Map<Mode, Store> = new Map();
+
+  const getStore = async (mode: Mode) => {
+    let db = await ddb;
+    if (db.hasOwnProperty("_rawDatabase")) {
+      // If this is an async-idb object, unwrap it first
+      db = unwrap(db);
     }
-    return store;
+    return db.transaction(storeName, mode).objectStore(storeName);
   };
+
   return {
     async create(s, key: KP = undefined) {
       const store = await getStore("readwrite");
@@ -114,19 +134,34 @@ export const createIDBEntity = <T, KP extends keyof T>(
       return s as T;
     },
 
-    async replace(key: T[KP], payload: Omit<T, KP>) {
+    async createMany(items: T[]) {
       const store = await getStore("readwrite");
+      for (const item of items) {
+        store.put(item);
+      }
+      return true;
+    },
+
+    async replace(key: T[KP], payload: Omit<T, KP>) {
       const newObj: T = { [keyPath as KP]: key, ...payload } as any;
+      const store = await getStore("readwrite");
       await store.put(newObj);
       return newObj;
     },
 
     async update(key, payload) {
       const store = await getStore("readwrite");
-      const existing = await store.get(key as any);
-      const newObj = { [keyPath]: key, ...existing, ...payload };
-      await store.put(newObj);
-      return newObj;
+      return new Promise((resolve) => {
+        const c = store.get(key as any);
+        c.onsuccess = (event: any) => {
+          const existing = event.target.result;
+          const newObj = { [keyPath]: key, ...existing, ...payload };
+          const putc = store.put(newObj);
+          putc.onsuccess = (event: any) => {
+            resolve(newObj);
+          };
+        };
+      });
     },
 
     query() {
@@ -152,53 +187,62 @@ export const createIDBEntity = <T, KP extends keyof T>(
           return false;
         },
 
+        _determineRange() {
+          let lowerBound = null;
+          let upperBound = null;
+          if (self._state.order === "next") {
+            lowerBound = self._state.lowerBound;
+            upperBound = self._state.upperBound;
+          } else {
+            lowerBound = self._state.upperBound;
+            upperBound = self._state.lowerBound;
+          }
+          if (lowerBound && upperBound) {
+            return IDBKeyRange.bound(lowerBound, upperBound);
+          } else if (lowerBound) {
+            return IDBKeyRange.lowerBound(lowerBound);
+          } else if (upperBound) {
+            return IDBKeyRange.upperBound(upperBound);
+          }
+        },
+
         async *_streamItems() {
+          let iterable: T[] = [];
           const store = await getStore("readonly");
-          let iterable: any;
           if (self._state.index !== null) {
             const order = self._state.order;
-            let range = null;
-            const lowerBound =
-              self._state.order === "next"
-                ? self._state.lowerBound
-                : self._state.upperBound;
-            const upperBound =
-              self._state.order === "next"
-                ? self._state.upperBound
-                : self._state.lowerBound;
-            if (lowerBound && upperBound) {
-              range = IDBKeyRange.bound(lowerBound, upperBound);
-            } else if (lowerBound) {
-              range = IDBKeyRange.lowerBound(lowerBound);
-            } else if (upperBound) {
-              range = IDBKeyRange.upperBound(upperBound);
-            }
+            let range: IDBKeyRange = self._determineRange();
             try {
-              let c = await store
+              const cursor = store
                 .index(self._state.index)
                 .openCursor(range, order);
-              iterable = {
-                [Symbol.asyncIterator]() {
-                  return {
-                    async next() {
-                      if (!c || c.value === undefined) return { done: true };
-                      const res = { done: false, value: { value: c.value } };
-                      c = await c.continue();
-                      return res;
-                    },
-                  };
-                },
-              };
+              iterable = await new Promise((resolve, reject) => {
+                let items: typeof iterable = [];
+                cursor.onsuccess = (event: any) => {
+                  const c = event.target.result;
+                  if (c) {
+                    items.push(c.value);
+                    c.continue();
+                  } else {
+                    resolve(items);
+                  }
+                };
+              });
             } catch (e) {
               throw {
                 error: `Index "${self._state.index}" does not exist on the store "${storeName}"`,
               };
             }
           } else {
-            iterable = store;
+            const cursor = store.getAll();
+            iterable = await new Promise((resolve, reject) => {
+              cursor.onsuccess = (event: any) => {
+                const items = event.target.result;
+                resolve(items);
+              };
+            });
           }
-          for await (const cursor of iterable) {
-            const item = cursor.value;
+          for (const item of iterable) {
             if (self._isFilteredOut(item)) {
               continue;
             }
