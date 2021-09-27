@@ -80,12 +80,27 @@ export type GroupedQuery<T> = Modify<
 
 export type QueryBuilder<T> = () => Query<T>;
 
+export type Store = any;
+
+export interface Transaction {
+  store: Store;
+}
+
 export interface DbEntity<T, KP extends keyof T> {
   create: (o: Omit<T, KP>, key?: KP) => Promise<T | null>;
   createMany: (items: T[]) => Promise<boolean>;
-  replace: (key: T[KP], payload: Omit<T, KP>) => Promise<T>;
-  update: (key: T[KP], payload: Partial<T>) => Promise<T>;
+  replace: (
+    key: T[KP],
+    payload: Omit<T, KP>,
+    transaction?: Transaction
+  ) => Promise<T>;
+  update: (
+    key: T[KP],
+    payload: Partial<T>,
+    transaction?: Transaction
+  ) => Promise<T>;
   query: QueryBuilder<T>;
+  createTransaction: (mode: Mode) => Promise<Transaction>;
 }
 type Bound = any;
 
@@ -93,7 +108,9 @@ interface Options<T> {
   keyPath: keyof T;
 }
 
-type Unwrap = (db: any) => any;
+export type Unwrap = (db: any) => any;
+
+export type Mode = "readwrite" | "readonly";
 
 /**
  * Creates an entity that can be later queried.
@@ -114,9 +131,6 @@ export const createIDBEntity = <T, KP extends keyof T>(
   unwrap: Unwrap | null = null
 ): DbEntity<T, KP> => {
   type Predicate = (item: T) => boolean;
-  type Mode = "readwrite" | "readonly";
-  type Store = any;
-  let stores: Map<Mode, Store> = new Map();
 
   const getStore = async (mode: Mode) => {
     let db = await ddb;
@@ -142,15 +156,27 @@ export const createIDBEntity = <T, KP extends keyof T>(
       return true;
     },
 
-    async replace(key: T[KP], payload: Omit<T, KP>) {
+    async createTransaction(mode: Mode) {
+      const store = await getStore(mode);
+      return { store };
+    },
+
+    async replace(key: T[KP], payload: Omit<T, KP>, transaction?: Transaction) {
       const newObj: T = { [keyPath as KP]: key, ...payload } as any;
-      const store = await getStore("readwrite");
-      await store.put(newObj);
+      const store = transaction
+        ? transaction.store
+        : await getStore("readwrite");
+      await new Promise<void>((resolve, reject) => {
+        const req = store.put(newObj);
+        req.onsuccess = () => resolve();
+      });
       return newObj;
     },
 
-    async update(key, payload) {
-      const store = await getStore("readwrite");
+    async update(key, payload, transaction?: Transaction) {
+      const store = transaction
+        ? transaction.store
+        : await getStore("readwrite");
       return new Promise((resolve) => {
         const c = store.get(key as any);
         c.onsuccess = (event: any) => {
