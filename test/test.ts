@@ -269,6 +269,11 @@ describe("entities", () => {
       expect(res).toEqual(teenageStudents.length);
     });
 
+    it("should count() items properly when index is applied ", async () => {
+      const res = await Student.query().byIndex("age").count();
+      expect(res).toEqual(allStudents.length);
+    });
+
     it("should return the length of items on count() with groupBy()", async () => {
       const res = await Student.query().groupBy("age").count();
       expect(res).toEqual(Array.from(studentsGroupedByAge.keys()).length);
