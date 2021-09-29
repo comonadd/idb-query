@@ -88,9 +88,11 @@ export interface Transaction {
   store: Store;
 }
 
-export interface DbEntity<T, KP extends keyof T> {
-  create: (o: T, key?: T[KP]) => Promise<T | null>;
-  createMany: (items: T[]) => Promise<boolean>;
+type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+export interface DbEntity<T, KP extends keyof T, TWK = PartialBy<T, KP>> {
+  create: (o: TWK, key?: T[KP]) => Promise<T | null>;
+  createMany: (items: TWK[]) => Promise<boolean>;
   replace: (
     key: T[KP],
     payload: Omit<T, KP>,
@@ -158,7 +160,7 @@ export const createIDBEntity = <T, KP extends keyof T>(
       });
     },
 
-    async createMany(items: T[]) {
+    async createMany(items) {
       const store = await getStore("readwrite");
       await Promise.all(
         items.map((item) => {
