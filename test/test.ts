@@ -279,6 +279,11 @@ describe("entities", () => {
       expect(res).toEqual(Array.from(studentsGroupedByAge.keys()).length);
     });
 
+    it("offset()", async () => {
+      const res = await Student.query().offset(2).all();
+      expect(res).toEqual(allStudents.slice(2));
+    });
+
     it("should delete single items matched by query correctly", async () => {
       const res = await Student.query()
         .filter((s) => s.age === 18)

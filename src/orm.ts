@@ -27,6 +27,7 @@ type Query<T> = {
     needToStopHere: ((item: T) => boolean) | null;
     groupBy: GroupBy<T> | null;
     order: "next" | "prev";
+    offset: number | null;
   };
   _isFilteredOut: (item: T) => boolean;
   _streamItems: () => AsyncGenerator<T>;
@@ -42,6 +43,7 @@ type Query<T> = {
   groupBy: (f: ((item: T) => any) | keyof T) => GroupedQuery<T>;
   one: () => Promise<T | null>;
   asc: () => Query<T>;
+  offset: (n: number) => Query<T>;
   desc: () => Query<T>;
   all: () => Promise<T[]>;
   count: () => Promise<number>;
@@ -87,7 +89,7 @@ export interface Transaction {
 }
 
 export interface DbEntity<T, KP extends keyof T> {
-  create: (o: Omit<T, KP>, key?: KP) => Promise<T | null>;
+  create: (o: T, key?: T[KP]) => Promise<T | null>;
   createMany: (items: T[]) => Promise<boolean>;
   replace: (
     key: T[KP],
@@ -142,17 +144,32 @@ export const createIDBEntity = <T, KP extends keyof T>(
   };
 
   return {
-    async create(s, key: KP = undefined) {
+    async create(s, key = undefined) {
       const store = await getStore("readwrite");
-      store.put(s, key);
-      return s as T;
+      return new Promise((resolve, reject) => {
+        try {
+          const req = store.put(s, key);
+          req.onsuccess = () => {
+            resolve(s as T);
+          };
+        } catch (e) {
+          reject(e);
+        }
+      });
     },
 
     async createMany(items: T[]) {
       const store = await getStore("readwrite");
-      for (const item of items) {
-        store.put(item);
-      }
+      await Promise.all(
+        items.map((item) => {
+          return new Promise<boolean>((resolve, reject) => {
+            const req = store.put(item);
+            req.onsuccess = () => {
+              resolve(true);
+            };
+          });
+        })
+      );
       return true;
     },
 
@@ -204,6 +221,7 @@ export const createIDBEntity = <T, KP extends keyof T>(
           groupBy: null,
           needToStopHere: null,
           order: "next",
+          offset: null,
         },
 
         _isFilteredOut(item: T) {
@@ -233,41 +251,37 @@ export const createIDBEntity = <T, KP extends keyof T>(
         },
 
         async *_streamItems() {
-          let iterable: T[] = [];
+          let cursor: any = null;
           const store = await getStore("readonly");
           if (self._state.index !== null) {
             const order = self._state.order;
             let range: IDBKeyRange = self._determineRange();
             try {
-              const cursor = store
-                .index(self._state.index)
-                .openCursor(range, order);
-              iterable = await new Promise((resolve, reject) => {
-                let items: typeof iterable = [];
-                cursor.onsuccess = (event: any) => {
-                  const c = event.target.result;
-                  if (c) {
-                    items.push(c.value);
-                    c.continue();
-                  } else {
-                    resolve(items);
-                  }
-                };
-              });
+              cursor = store.index(self._state.index).openCursor(range, order);
             } catch (e) {
               throw {
                 error: `Index "${self._state.index}" does not exist on the store "${storeName}"`,
               };
             }
           } else {
-            const cursor = store.getAll();
-            iterable = await new Promise((resolve, reject) => {
-              cursor.onsuccess = (event: any) => {
-                const items = event.target.result;
-                resolve(items);
-              };
-            });
+            cursor = store.openCursor();
           }
+          const iterable: T[] = await new Promise((resolve, reject) => {
+            let items: T[] = [];
+            let didOffset = false;
+            cursor.onsuccess = (event: any) => {
+              const c = event.target.result;
+              if (!didOffset && self._state.offset !== null) {
+                c.advance(self._state.offset);
+                didOffset = true;
+              } else if (c) {
+                items.push(c.value);
+                c.continue();
+              } else {
+                resolve(items);
+              }
+            };
+          });
           for (const item of iterable) {
             if (self._isFilteredOut(item)) {
               continue;
@@ -384,6 +398,17 @@ export const createIDBEntity = <T, KP extends keyof T>(
               return self;
             },
           } as any as GroupedQuery<T>;
+        },
+
+        offset(n: number) {
+          if (n < 0) {
+            throw {
+              error: `Invalid offset specified (${n}), must be positive`,
+            };
+          } else if (n > 0) {
+            self._state.offset = n;
+          }
+          return self;
         },
 
         // Return the first item
