@@ -330,6 +330,31 @@ describe("entities", () => {
           .one()
       ).toStrictEqual(s);
     });
+
+    it("should not fail creating multiple entities in a row", async () => {
+      const students = [
+        withId({
+          name: "Steve",
+          age: 283,
+          major: "Administration",
+        }),
+        withId({ name: "Joshua", age: 12, major: "Cooking" }),
+        withId({
+          name: "Rebecca",
+          age: 32,
+          major: "Psychology",
+        }),
+      ];
+      for (const s of students) {
+        const res: IStudent = await Student.create(s);
+        expect(res).toEqual(s);
+        expect(
+          await Student.query()
+            .filter((st) => st.age === s.age)
+            .one()
+        ).toStrictEqual(s);
+      }
+    });
   });
 
   describe("Entity.replace", () => {
