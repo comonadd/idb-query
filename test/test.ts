@@ -269,6 +269,11 @@ describe("entities", () => {
       expect(res).toEqual(teenageStudents.length);
     });
 
+    it("count() should return full length when it's the only specified qualifier", async () => {
+      const res = await Student.query().count();
+      expect(res).toEqual(allStudents.length);
+    });
+
     it("should count() items properly when index is applied ", async () => {
       const res = await Student.query().byIndex("age").count();
       expect(res).toEqual(allStudents.length);
@@ -379,6 +384,42 @@ describe("entities", () => {
         ...s,
         major: "Administration",
       });
+    });
+  });
+
+  describe("Entity.delete", () => {
+    it("should delete single items", async () => {
+      const s = withId({
+        name: "Martin",
+        age: 823,
+        major: "Computer Science",
+      });
+      const res: IStudent = await Student.create(s);
+      await Student.delete(s.id);
+      const studentAfterUpdate = await Student.query()
+        .filter(({ id }) => id === s.id)
+        .all();
+      expect(studentAfterUpdate.length).toEqual(0);
+    });
+
+    it("should delete many items at once", async () => {
+      const s = withId({
+        name: "Martin",
+        age: 823,
+        major: "Computer Science",
+      });
+      await Student.create(s);
+      const s1 = withId({
+        name: "Martin",
+        age: 323,
+        major: "Computer Science",
+      });
+      await Student.create(s1);
+      await Student.deleteMany([s.id, s1.id]);
+      const studentAfterUpdate = await Student.query()
+        .filter(({ id }) => id === s.id || id === s1.id)
+        .all();
+      expect(studentAfterUpdate.length).toEqual(0);
     });
   });
 });

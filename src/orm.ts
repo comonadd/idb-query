@@ -91,6 +91,7 @@ export interface Transaction {
 type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 export interface DbEntity<T, KP extends keyof T, TWK = PartialBy<T, KP>> {
+  createTransaction: (mode: Mode) => Promise<Transaction>;
   create: (o: TWK, key?: T[KP]) => Promise<T | null>;
   createMany: (items: TWK[]) => Promise<boolean>;
   replace: (
@@ -104,7 +105,8 @@ export interface DbEntity<T, KP extends keyof T, TWK = PartialBy<T, KP>> {
     transaction?: Transaction
   ) => Promise<T>;
   query: QueryBuilder<T>;
-  createTransaction: (mode: Mode) => Promise<Transaction>;
+  delete(key: T[KP], transaction?: Transaction): Promise<boolean>;
+  deleteMany(keys: T[KP][]): Promise<boolean[]>;
 }
 type Bound = any;
 
@@ -207,6 +209,33 @@ export const createIDBEntity = <T, KP extends keyof T>(
           };
         };
       });
+    },
+
+    async delete(key, transaction?: Transaction) {
+      const store = transaction
+        ? transaction.store
+        : await getStore("readwrite");
+      return new Promise<boolean>((resolve) => {
+        const c = store.delete(key);
+        c.onsuccess = (event: any) => {
+          resolve(true);
+        };
+      });
+    },
+
+    async deleteMany(keys) {
+      const store = await getStore("readwrite");
+      return Promise.all<boolean>(
+        keys.map(
+          (key) =>
+            new Promise<boolean>((resolve) => {
+              const c = store.delete(key);
+              c.onsuccess = (event: any) => {
+                resolve(true);
+              };
+            })
+        )
+      );
     },
 
     query() {
